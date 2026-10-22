@@ -4,30 +4,108 @@
 #include "test_utils.h"
 #include <stdint.h>
 
+#define UPC_LEN        (N0 * P)
+#define UPC_TAIL_BITS  (UPC_LEN % I8_IN_YMM)
+#define UPC_TAIL_MASK  (UPC_TAIL_BITS ? ((1u << UPC_TAIL_BITS) - 1u) : 0xFFFFFFFFu)
+
+/**
+ * @brief Find the maximum value inside an array of uint8_t of length UPC_LEN.
+ *        This is constant time because we have to scan all the array to find the maximum.
+ * @return The maximum value.
+ */
+static inline uint8_t hmax_u8(const uint8_t *arr) {
+   
+   __m256i a0 = _mm256_setzero_si256();
+   __m256i a1 = a0;
+   /* ------------------------------------- Scan with two register ---------------------------------------- */
+   /* a0 contains the maximum between odds registers   */
+   /* a1 contains the maximum between events registers */
+   /* With two acculmulator we broke the sequential dependency */
+   int i = 0;
+   for (; i + 1 < N_REGS_UPC; i += 2) {
+      a0 = _mm256_max_epu8(a0, _mm256_loadu_si256((const __m256i *)&arr[i * 32]));
+      a1 = _mm256_max_epu8(a1, _mm256_loadu_si256((const __m256i *)&arr[(i + 1) * 32]));
+   }
+   /* This is necessary because otherwise the register 771 (valid only for r = 12323) will be not included */ 
+   if (i < N_REGS_UPC) a0 = _mm256_max_epu8(a0, _mm256_loadu_si256((const __m256i *)&arr[i * 32]));
+    
+   /* -------------------------------------- Horizontal reduction ----------------------------------------- */
+   a0 = _mm256_max_epu8(a0, a1);
+   __m128i m = _mm_max_epu8(_mm256_castsi256_si128(a0), _mm256_extracti128_si256(a0, 1));
+   m = _mm_max_epu8(m, _mm_srli_si128(m, 8));
+   m = _mm_max_epu8(m, _mm_srli_si128(m, 4));
+   m = _mm_max_epu8(m, _mm_srli_si128(m, 2));
+   m = _mm_max_epu8(m, _mm_srli_si128(m, 1));
+   return (uint8_t)_mm_extract_epi8(m, 0);
+}
+
+static inline uint32_t ct_nz32(uint32_t x) {
+   uint32_t m = (uint32_t)0 - ((x | ((uint32_t)0 - x)) >> 31);
+   __asm__("" : "+r"(m));
+   return m;
+}
+static inline uint64_t ct_nz64(uint64_t x) {
+   uint64_t m = (uint64_t)0 - ((x | ((uint64_t)0 - x)) >> 63);
+   __asm__("" : "+r"(m));
+   return m;
+}
+static inline uint32_t isnz64(uint64_t x) { return (uint32_t)((x | ((uint64_t)0 - x)) >> 63); }
+static inline uint32_t ct_ctz_u64(uint64_t x) {
+   uint64_t y = x & ((uint64_t)0 - x);
+   uint32_t n = 0;
+   n |= isnz64(y & 0xAAAAAAAAAAAAAAAAull) << 0;
+   n |= isnz64(y & 0xCCCCCCCCCCCCCCCCull) << 1;
+   n |= isnz64(y & 0xF0F0F0F0F0F0F0F0ull) << 2;
+   n |= isnz64(y & 0xFF00FF00FF00FF00ull) << 3;
+   n |= isnz64(y & 0xFFFF0000FFFF0000ull) << 4;
+   n |= isnz64(y & 0xFFFFFFFF00000000ull) << 5;
+   return n;
+}
+static inline uint32_t ct_ctz_u32(uint32_t x) { return ct_ctz_u64((uint64_t)x); }
+
+static inline uint32_t mm(__m256i vmax, const uint8_t *p) {
+   return (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(_mm256_loadu_si256((const __m256i *)p), vmax));
+}
+
+
+static INLINE POS argmax_u8_ct(const uint8_t *arr) {
+
+   /* ------------------------------------- V copies of the max value ---------------------------------------- */
+   __m256i vmax = _mm256_set1_epi8((char)hmax_u8(arr));
+   
+   /* ------------------------------------- Scan to find the position ---------------------------------------- */
+   uint64_t found = 0, bm = 0, br = 0;
+   int i = 0;
+   for (; i + 1 < N_REGS_UPC; i += 2) {
+      uint64_t lo = mm(vmax, &arr[i * 32]);
+      uint64_t hi = mm(vmax, &arr[(i + 1) * 32]);
+      if (i + 1 == N_REGS_UPC - 1) hi &= UPC_TAIL_MASK;
+      /* -------------- Combine the two masks ---------------- */
+      /* cmpeq return a 32 bit mask but we can use a bigger register to combine them */
+      uint64_t mask = lo | (hi << 32);
+      
+      uint64_t nz = ct_nz64(mask);
+      uint64_t sel = nz & ~found;
+      bm |= mask & sel; br |= (uint64_t)i & sel; found |= nz;
+   }
+   if (i < N_REGS_UPC) {               /* registro dispari finale (i è pubblico) */
+      uint64_t mask = mm(vmax, &arr[i * 32]) & UPC_TAIL_MASK;
+      uint64_t nz = ct_nz64(mask);
+      uint64_t sel = nz & ~found;
+      bm |= mask & sel; br |= (uint64_t)i & sel; found |= nz;
+   }
+   return (POS)(br * 32 + ct_ctz_u64(bm));
+}
+
 /* ------------------------------------------------------------------------------*/
 /*                                   ARGMAX                                      */ 
 /* ------------------------------------------------------------------------------*/
 static INLINE POS argmax_u8(uint8_t arr[PAD8(N0 * P)]) {
 
    /* ------------- Scan to find maximum values ------------------ */
-   __m256i max_vec = _mm256_setzero_si256();
-   for (int i = 0; i < N_REGS_UPC; i++) {
-      __m256i v = _mm256_loadu_si256((__m256i *)&arr[i * I8_IN_YMM]);
-      max_vec = _mm256_max_epu8(max_vec, v);
-   }
+   __m256i vmax = _mm256_set1_epi8((char)hmax_u8(arr));
 
-   /* ----------- Find the maximum inside the vector ------------- */
-   __m128i lo = _mm256_castsi256_si128(max_vec);
-   __m128i hi = _mm256_extracti128_si256(max_vec, 1);
-   __m128i m = _mm_max_epu8(lo, hi);
-   m = _mm_max_epu8(m, _mm_srli_si128(m, 8));
-   m = _mm_max_epu8(m, _mm_srli_si128(m, 4));
-   m = _mm_max_epu8(m, _mm_srli_si128(m, 2));
-   m = _mm_max_epu8(m, _mm_srli_si128(m, 1));
-   uint8_t max_val = (uint8_t)_mm_extract_epi8(m, 0);
-   
    /* ------------- Scan to find the max position ---------------- */
-   __m256i vmax = _mm256_set1_epi8((uint8_t)max_val);
    for (int i = 0; i < N_REGS_UPC; i++) {
       __m256i v = _mm256_loadu_si256((__m256i *)&arr[i * I8_IN_YMM]);
       __m256i cmp = _mm256_cmpeq_epi8(v, vmax);
@@ -143,15 +221,16 @@ int bfmax_decoder(
 )
 {
    __m256i v_H_sparse[N0][N_REGS_H];
+   const __m256i lane_idx = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
    for (int block = 0; block < N0; block++) {
-   for (int r = 0; r < N_REGS_H; r++) {
-      int remaining = V - r * I32_IN_YMM;
-      __mmask8 kmask = (remaining >= I32_IN_YMM) ? 0xFF
-                     : (remaining <= 0 ? 0x00 : (__mmask8)((1u << remaining) - 1));
-      v_H_sparse[block][r] = _mm256_maskz_loadu_epi32(kmask, (const void *)&H_sparse[block][r * I32_IN_YMM]);
+      for (int r = 0; r < N_REGS_H; r++) {
+         int remaining = V - r * I32_IN_YMM;
+         /* lane j attiva se j < remaining */
+         __m256i kmask = _mm256_cmpgt_epi32(_mm256_set1_epi32(remaining), lane_idx);
+         v_H_sparse[block][r] = _mm256_maskload_epi32(
+            (const int *)&H_sparse[block][r * I32_IN_YMM], kmask);
       }
    }
-
    /* compute unsatisfied parity checks */
    ALIGNED uint8_t upc[PAD8(N0 * P)] = {0};
    compute_upcs(upc, Htr_sparse, syndrome_bits);

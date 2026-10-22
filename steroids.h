@@ -18,16 +18,30 @@ static INLINE uint8_t bfx_hmax(__m256i v)
 /* -------------------- Scan the full array to find the maximums ------------------- */
  static INLINE uint8_t bfmax_max(IN const uint8_t upc[PAD8(N0 * P)])
  {
-    __m256i vm = _mm256_setzero_si256();
-    int i = 0;
-    for (; i + 32 <= N0 * P; i += 32) {
-       vm = _mm256_max_epu8(vm, _mm256_loadu_si256((const __m256i *)(upc + i)));
-    }
-    uint8_t m = bfx_hmax(vm);
-    for (; i < N0 * P; i++) {
-       if (upc[i] > m) m = upc[i];
-    }
-    return m;
+
+
+   __m256i a0 = _mm256_setzero_si256();
+   __m256i a1 = a0;
+   /* ------------------------------------- Scan with two register ---------------------------------------- */
+   /* a0 contains the maximum between odds registers   */
+   /* a1 contains the maximum between events registers */
+   /* With two acculmulator we broke the sequential dependency */
+   int i = 0;
+   for (; i + 1 < N_REGS_UPC; i += 2) {
+      a0 = _mm256_max_epu8(a0, _mm256_loadu_si256((const __m256i *)&upc[i * 32]));
+      a1 = _mm256_max_epu8(a1, _mm256_loadu_si256((const __m256i *)&upc[(i + 1) * 32]));
+   }
+   /* This is necessary because otherwise the register 771 will be not included */ 
+   if (i < N_REGS_UPC) a0 = _mm256_max_epu8(a0, _mm256_loadu_si256((const __m256i *)&upc[i * 32]));
+    
+   /* -------------------------------------- Horizontal reduction ----------------------------------------- */
+   a0 = _mm256_max_epu8(a0, a1);
+   __m128i m = _mm_max_epu8(_mm256_castsi256_si128(a0), _mm256_extracti128_si256(a0, 1));
+   m = _mm_max_epu8(m, _mm_srli_si128(m, 8));
+   m = _mm_max_epu8(m, _mm_srli_si128(m, 4));
+   m = _mm_max_epu8(m, _mm_srli_si128(m, 2));
+   m = _mm_max_epu8(m, _mm_srli_si128(m, 1));
+   return (uint8_t)_mm_extract_epi8(m, 0);
  }
 
  /* --------------------- First index whose counter equals mx --------------------- */

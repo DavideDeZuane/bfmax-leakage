@@ -6,6 +6,14 @@
 #include <immintrin.h>
 #include <stdalign.h>
 #include <string.h>
+#include <valgrind/memcheck.h>
+
+/* ------------------------------------------------------------------------------*/
+/*                                POISON.H                                       */ 
+/* ------------------------------------------------------------------------------*/
+#define poison(addr, len) VALGRIND_MAKE_MEM_UNDEFINED(addr, len)
+#define unpoison(addr, len) VALGRIND_MAKE_MEM_DEFINED(addr, len)
+#define is_poisoned(addr, len) VALGRIND_CHECK_MEM_IS_DEFINED(addr, len)
 
 /* ------------------------------------------------------------------------------*/
 /*                                PARAMETERS                                     */ 

@@ -6,7 +6,7 @@ case "$1" in
         echo "🚀 Running benchmark..."
         echo "========================================"
         rm -f main
-        gcc -o main main.c -march=native -O3 -lcpucycles -DBENCH=1
+        gcc -o main main.c -mavx2 -mbmi -O3 -lcpucycles -DBENCH=1
         taskset --cpu-list 0 ./main
         ;;
     test)
@@ -16,6 +16,7 @@ case "$1" in
         rm -f main
         gcc -o main main.c \
             -mavx2 \
+	    -mbmi \
             -O2 \
             -g3 \
             -fsanitize=address \
@@ -27,18 +28,26 @@ case "$1" in
             -DDEBUG=1
         taskset --cpu-list 0 ./main
         ;;
-    build)
+    leakage)
 	echo "========================================"
         echo ""
         echo "========================================"
         rm -f main
         gcc -o main main.c \
-        -mavx2 \
-        -msse4.1 \
-	    -O0 \
-	    -g3 \
-	    -fno-omit-frame-pointer \
+            -mavx2 \
+            -msse4.1 \
+	        -O0 \
+	        -g3 \
+	        -fno-omit-frame-pointer \
+		-DCT_ANALYSIS=1
+        
+        valgrind --tool=memcheck \
+            --track-origins=yes \
+            --leak-check=no \
+            --error-limit=no \
+            ./main
         ;;
+
     *)
         echo "Uso: $0 {bench|test}"
         exit 1

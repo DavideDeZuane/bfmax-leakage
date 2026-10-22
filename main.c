@@ -7,14 +7,13 @@
 #include <immintrin.h>
 #include <stdalign.h>
 #include <assert.h>
-#include <valgrind/memcheck.h>
 
 /* ------------------------------------------------------------------------------*/
 /*                                  MODULUES                                     */ 
 /* ------------------------------------------------------------------------------*/
 #include "helpers.h"        // printers and random sampling
 #include "defines.h"        // all defines necessary
-#include "test_utils.h"     // functions to compute syndrome, transpose H, etc.
+#include "test_utils.h"     // functions to compute syndrome, transpose H, etc./
 //#include "bfmax.h"        // bfmax decoding function
 #include "steroids.h"       // optimized implementation of the bfmax
 
@@ -69,11 +68,12 @@ int main() {
         dense_to_u8(syndrome_bits, s_dense, P);
 	    /* -------------------------------------------------- */ 
 
-        #ifdef RUNNING_ON_VALGRIND
-        VALGRIND_MAKE_MEM_UNDEFINED(H_sparse, sizeof(H_sparse));
-        VALGRIND_MAKE_MEM_UNDEFINED(Htr_sparse, sizeof(Htr_sparse));
-        #endif
-
+#ifdef CT_ANALYSIS          
+    poison(H_sparse,  sizeof(H_sparse));
+    poison(Htr_sparse, sizeof(Htr_sparse));
+    poison(syndrome_bits, sizeof(syndrome_bits));
+    poison(ctx.A, sizeof(ctx.A));  
+#endif
 	    /* -------------------------------------------------- */ 
 	    /*                    DECRYPT  		 	              */ 
 	    /* -------------------------------------------------- */ 
@@ -84,6 +84,9 @@ int main() {
         uint8_t ret = bfmax_decoder_steroids(e_out_dense, Htr_sparse, H_sparse, syndrome_bits, &ctx);
         count_2 = CPUCYCLES(test);
         /* benchmark end */
+#ifdef CT_ANALYSIS
+    unpoison(e_out_dense, sizeof(e_out_dense));   // altrimenti memcmp/if segnalano errori dell'harness
+#endif
         uint8_t cmp = memcmp(e_out_dense, e_in_dense, N0*NUM_DIGITS_GF2X_ELEMENT*sizeof(uint64_t));
         if (cmp != 0) ERROR("e_in != e_out");
 	    /* -------------------------------------------------- */ 
