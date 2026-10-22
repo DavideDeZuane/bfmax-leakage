@@ -239,7 +239,7 @@ int bfmax_decoder(
    int iter = 0;
    int hw = hw_start;
    do {
-      POS col = argmax_u8(upc);
+      POS col = argmax_u8_ct(upc);
       int col_block = col / P;
       int col_bit = col % P;
       gf2x_toggle_coeff(error + col_block * NUM_DIGITS_GF2X_ELEMENT, col_bit);

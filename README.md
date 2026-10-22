@@ -39,6 +39,13 @@ Si usa Welch e non lo Student classico perché non assume che le due classi abbi
 Se il codice è constant-time (ipotesi nulla: medie uguali), con molte misure t si distribuisce circa come una normale standard, quindi di solito sta fra −2 e +2. La probabilità che superi 4.5 in valore assoluto per puro caso è circa 7 su un milione. Per questo |t| > 4.5 è considerato evidenza di leakage. È la soglia usata nella valutazione side-channel (TVLA) e in dudect.
 
 
+## Mastik 
+
+Micro-architectural side-channel attacks exploit contention on internal components of the processor to leak information between processes. While in theory such attacks are straightforward, practical implementations tend to be finicky and require significant understanding of poorly documented processor features and other domain-specific arcane knowledge.
+
+
+[Mastik](https://github.com/0xADE1A1DE/Mastik)is a toolkit for experimenting with micro-architectural side-channel attacks. Mastik aims to provide implementations of published attack and analysis techniques.
+
 #### References
 
 - [timecop](https://trailofbits.github.io/testing-handbook-preview/pr-preview/pr-2/docs/crypto/constant_time_tool/timecop/)

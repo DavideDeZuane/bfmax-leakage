@@ -6,7 +6,7 @@ case "$1" in
         echo "🚀 Running benchmark..."
         echo "========================================"
         rm -f main
-        gcc -o main main.c -mavx2 -mbmi -O3 -lcpucycles -DBENCH=1
+        gcc -o main main.c -mavx2 -mbmi -O3 -lcpucycles -DBENCH=1 -DFIXED_NEG
         taskset --cpu-list 0 ./main
         ;;
     test)

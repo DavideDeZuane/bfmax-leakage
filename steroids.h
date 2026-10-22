@@ -18,33 +18,22 @@ static INLINE uint8_t bfx_hmax(__m256i v)
 /* -------------------- Scan the full array to find the maximums ------------------- */
  static INLINE uint8_t bfmax_max(IN const uint8_t upc[PAD8(N0 * P)])
  {
-
-
-   __m256i a0 = _mm256_setzero_si256();
-   __m256i a1 = a0;
-   /* ------------------------------------- Scan with two register ---------------------------------------- */
-   /* a0 contains the maximum between odds registers   */
-   /* a1 contains the maximum between events registers */
-   /* With two acculmulator we broke the sequential dependency */
-   int i = 0;
-   for (; i + 1 < N_REGS_UPC; i += 2) {
-      a0 = _mm256_max_epu8(a0, _mm256_loadu_si256((const __m256i *)&upc[i * 32]));
-      a1 = _mm256_max_epu8(a1, _mm256_loadu_si256((const __m256i *)&upc[(i + 1) * 32]));
-   }
-   /* This is necessary because otherwise the register 771 will be not included */ 
-   if (i < N_REGS_UPC) a0 = _mm256_max_epu8(a0, _mm256_loadu_si256((const __m256i *)&upc[i * 32]));
-    
-   /* -------------------------------------- Horizontal reduction ----------------------------------------- */
-   a0 = _mm256_max_epu8(a0, a1);
-   __m128i m = _mm_max_epu8(_mm256_castsi256_si128(a0), _mm256_extracti128_si256(a0, 1));
-   m = _mm_max_epu8(m, _mm_srli_si128(m, 8));
-   m = _mm_max_epu8(m, _mm_srli_si128(m, 4));
-   m = _mm_max_epu8(m, _mm_srli_si128(m, 2));
-   m = _mm_max_epu8(m, _mm_srli_si128(m, 1));
-   return (uint8_t)_mm_extract_epi8(m, 0);
+    __m256i vm = _mm256_setzero_si256();
+    int i = 0;
+    for (; i + 32 <= N0 * P; i += 32) {
+       vm = _mm256_max_epu8(vm, _mm256_loadu_si256((const __m256i *)(upc + i)));
+    }
+    uint8_t m = bfx_hmax(vm);
+    for (; i < N0 * P; i++) {
+       if (upc[i] > m) m = upc[i];
+    }
+    return m;
  }
 
  /* --------------------- First index whose counter equals mx --------------------- */
+#ifdef VT_FIND
+ /* variable-time version: stops at the first 64-counter block holding the maximum,
+    so the time reveals flip / 64 */
  static INLINE POS bfmax_find(IN const uint8_t upc[PAD8(N0 * P)], IN uint8_t mx)
  {
     const __m256i v = _mm256_set1_epi8((char)mx);
@@ -60,7 +49,82 @@ static INLINE uint8_t bfx_hmax(__m256i v)
     }
     return (POS)-1;
  }
- 
+#else
+ /* constant-time version: always scans the whole array, two YMM (64 counters)
+    at a time; the first block with a match is selected with masks */
+
+ /* 0xFF..FF if x != 0, 0 otherwise (the barrier stops the compiler from
+    turning the selections below back into branches) */
+ static INLINE uint64_t ct_nz64_mask(uint64_t x)
+ {
+    uint64_t m = (uint64_t)0 - ((x | ((uint64_t)0 - x)) >> 63);
+    __asm__("" : "+r"(m));
+    return m;
+ }
+ static INLINE uint32_t ct_is_nz64(uint64_t x)
+ {
+    return (uint32_t)((x | ((uint64_t)0 - x)) >> 63);
+ }
+ /* trailing zeros of x (x != 0) without bsf/tzcnt */
+ static INLINE uint32_t ct_ctz64(uint64_t x)
+ {
+    uint64_t y = x & ((uint64_t)0 - x);
+    uint32_t n = 0;
+    n |= ct_is_nz64(y & 0xAAAAAAAAAAAAAAAAULL) << 0;
+    n |= ct_is_nz64(y & 0xCCCCCCCCCCCCCCCCULL) << 1;
+    n |= ct_is_nz64(y & 0xF0F0F0F0F0F0F0F0ULL) << 2;
+    n |= ct_is_nz64(y & 0xFF00FF00FF00FF00ULL) << 3;
+    n |= ct_is_nz64(y & 0xFFFF0000FFFF0000ULL) << 4;
+    n |= ct_is_nz64(y & 0xFFFFFFFF00000000ULL) << 5;
+    return n;
+ }
+
+ #define FIND_FULL ((N0 * P) / 64 * 64)    /* counters covered by whole 64-blocks */
+ #define FIND_TAIL ((N0 * P) - FIND_FULL)  /* remaining counters (< 64)           */
+ _Static_assert(PAD8(N0 * P) >= FIND_FULL + ((FIND_TAIL + 31) / 32) * 32,
+                "upc is too short for the tail loads of bfmax_find");
+
+ static INLINE uint64_t find_mask64(const uint8_t *p, __m256i v)
+ {
+    uint64_t lo = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(_mm256_loadu_si256((const __m256i *)p), v));
+    uint64_t hi = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(_mm256_loadu_si256((const __m256i *)(p + 32)), v));
+    return lo | (hi << 32);
+ }
+
+ static INLINE POS bfmax_find(IN const uint8_t upc[PAD8(N0 * P)], IN uint8_t mx)
+ {
+    const __m256i v = _mm256_set1_epi8((char)mx);
+    uint64_t found = 0, best_mask = 0, best_i = 0;
+
+    for (uint64_t i = 0; i < FIND_FULL; i += 64) {
+       uint64_t m   = find_mask64(upc + i, v);
+       uint64_t nz  = ct_nz64_mask(m);        /* not on the dependency chain */
+       uint64_t sel = nz & ~found;            /* all ones only at the first match */
+       best_mask |= m & sel;
+       best_i    |= i & sel;
+       found     |= nz;
+    }
+ #if FIND_TAIL > 0
+    {  /* last partial block: the padding counters are masked out */
+       uint64_t m = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(
+                       _mm256_loadu_si256((const __m256i *)(upc + FIND_FULL)), v));
+    #if FIND_TAIL > 32
+       m |= (uint64_t)(uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(
+                       _mm256_loadu_si256((const __m256i *)(upc + FIND_FULL + 32)), v)) << 32;
+    #endif
+       m &= (FIND_TAIL == 64) ? ~(uint64_t)0 : (((uint64_t)1 << FIND_TAIL) - 1);
+       uint64_t nz  = ct_nz64_mask(m);
+       uint64_t sel = nz & ~found;
+       best_mask |= m & sel;
+       best_i    |= (uint64_t)FIND_FULL & sel;
+       found     |= nz;
+    }
+ #endif
+    /* best_mask != 0 because mx is the maximum of the counters */
+    return (POS)(best_i + ct_ctz64(best_mask));
+ }
+#endif
+
  ////////////////////////////////////////////////////////////////////////////////
  /* sb[j] -= A[(j-pos) mod r]  (or += when !neg); returns running max */
  static INLINE __m256i bfx_dense(uint8_t *sb, const uint8_t *A, uint32_t pos, int neg,
@@ -139,6 +203,54 @@ static INLINE uint8_t bfx_hmax(__m256i v)
     const int b = flip >= P;
     const uint32_t pos = flip - b * P;
  
+#if defined(FIXED_SCATTER)
+    /* ----------------------------------------------------------------------
+     * neg fixed + scatter of fixed length:
+     *   dense step: -A for all V rows (as if every row became satisfied)
+     *   scatter:    +2 on every row of the column, multiplied by its new
+     *               syndrome bit (0 for rows that became satisfied)
+     * The number of updates is always N0*V*V: it no longer depends on how
+     * many rows became unsatisfied. Addresses are still secret (cache).
+     * ---------------------------------------------------------------------- */
+    const int neg = 1;
+    uint32_t rows[V];
+    uint8_t  drow[V];
+    int unsat = 0;
+    for (int k = 0; k < V; k++) {
+       uint32_t r = Htr_sparse[b][k] + pos;
+       r -= (r >= P) ? P : 0;
+       uint8_t s = (syndrome_bits[r] ^= 1);
+       rows[k] = r;
+       drow[k] = (uint8_t)(s << 1);   /* 2 if the row became unsatisfied, 0 otherwise */
+       unsat += s;
+    }
+    hw += unsat - (V - unsat);
+
+    const __m256i vR = _mm256_set1_epi32(P);
+    uint16_t *idx = ctx->idx;
+    int n = 0;
+    for (int b2 = 0; b2 < N0; b2++) {
+       const __m256i voff = _mm256_set1_epi32(b2 * P);
+       for (int k = 0; k < V; k++) {
+          const __m256i vr = _mm256_set1_epi32(rows[k]);
+          for (int m = 0; m < BFX_HPAD; m += 8) {
+             __m256i c = _mm256_add_epi32(_mm256_load_si256((const __m256i *)&ctx->H[b2][m]), vr);
+             c = _mm256_min_epu32(c, _mm256_sub_epi32(c, vR));   /* mod r */
+             c = _mm256_add_epi32(c, voff);
+             __m128i p = _mm_packus_epi32(_mm256_castsi256_si128(c), _mm256_extracti128_si256(c, 1));
+             _mm_storeu_si128((__m128i *)&idx[n + m], p);
+          }
+          n += V;
+       }
+    }
+    for (int b2 = 0; b2 < N0; b2++) {
+       for (int k = 0; k < V; k++) {
+          const uint8_t d = drow[k];
+          const uint16_t *ix = idx + (b2 * V + k) * V;
+          for (int m = 0; m < V; m++) upc[ix[m]] += d;
+       }
+    }
+#else
     /* 1. toggle the D syndrome bits, split rows by their new value */
     uint32_t rows[2][V];
     int cnt[2] = {0, 0};
@@ -149,9 +261,15 @@ static INLINE uint8_t bfx_hmax(__m256i v)
        rows[s][cnt[s]++] = r;
     }
     hw += cnt[1] - cnt[0];
- 
+
+ #if defined(FIXED_NEG)
+    /* always dense -A and scatter +2 on the rows that became unsatisfied:
+       correct for any flip, no branch on the syndrome bits */
+    const int neg = 1;
+ #else
     /* 2. minority sign -> scatter, majority -> dense table */
     const int neg = cnt[1] <= cnt[0];   /* usual case: dense -A, scatter +2 on newly unsat rows */
+ #endif
     const uint32_t *sr = rows[neg];
     const int ns = cnt[neg];
     const uint8_t d2 = neg ? 2 : (uint8_t)-2;
@@ -181,7 +299,8 @@ static INLINE uint8_t bfx_hmax(__m256i v)
        upc[idx[i + 2]] += d2; upc[idx[i + 3]] += d2;
     }
     for (; i < n; i++) upc[idx[i]] += d2;
- 
+#endif
+
     /* 4. dense rotated table, fused with the max for the next iteration */
     __m256i vmax = _mm256_setzero_si256();
     uint8_t smax = 0;
