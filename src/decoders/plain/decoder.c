@@ -17,7 +17,7 @@
  *        This is constant time because we have to scan all the array to find the maximum.
  * @return The maximum value.
  */
-static inline uint8_t hmax_u8(const uint8_t *arr) {
+static INLINE uint8_t hmax_u8(const uint8_t *arr) {
 
    __m256i a0 = _mm256_setzero_si256();
    __m256i a1 = a0;

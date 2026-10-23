@@ -3,7 +3,6 @@
 #include <immintrin.h>
 #include "types.h"
 
-/* numero di bit per rappresentare N (da defines.h originale) */
 #define IS_REPRESENTABLE_IN_D_BITS(D, N) (((unsigned long) N >= (1UL << (D - 1)) && (unsigned long) N < (1UL << D)) ? D : -1)
 #define BITS_TO_REPRESENT(N) (N == 0 ? 1 : (31 + IS_REPRESENTABLE_IN_D_BITS( 1, N) + IS_REPRESENTABLE_IN_D_BITS( 2, N) + IS_REPRESENTABLE_IN_D_BITS( 3, N) + IS_REPRESENTABLE_IN_D_BITS( 4, N) + IS_REPRESENTABLE_IN_D_BITS( 5, N) + IS_REPRESENTABLE_IN_D_BITS( 6, N) + IS_REPRESENTABLE_IN_D_BITS( 7, N) + IS_REPRESENTABLE_IN_D_BITS( 8, N) + IS_REPRESENTABLE_IN_D_BITS( 9, N) + IS_REPRESENTABLE_IN_D_BITS(10, N) + IS_REPRESENTABLE_IN_D_BITS(11, N) + IS_REPRESENTABLE_IN_D_BITS(12, N) + IS_REPRESENTABLE_IN_D_BITS(13, N) + IS_REPRESENTABLE_IN_D_BITS(14, N) + IS_REPRESENTABLE_IN_D_BITS(15, N) + IS_REPRESENTABLE_IN_D_BITS(16, N) + IS_REPRESENTABLE_IN_D_BITS(17, N) + IS_REPRESENTABLE_IN_D_BITS(18, N) + IS_REPRESENTABLE_IN_D_BITS(19, N) + IS_REPRESENTABLE_IN_D_BITS(20, N) + IS_REPRESENTABLE_IN_D_BITS(21, N) + IS_REPRESENTABLE_IN_D_BITS(22, N) + IS_REPRESENTABLE_IN_D_BITS(23, N) + IS_REPRESENTABLE_IN_D_BITS(24, N) + IS_REPRESENTABLE_IN_D_BITS(25, N) + IS_REPRESENTABLE_IN_D_BITS(26, N) + IS_REPRESENTABLE_IN_D_BITS(27, N) + IS_REPRESENTABLE_IN_D_BITS(28, N) + IS_REPRESENTABLE_IN_D_BITS(29, N) + IS_REPRESENTABLE_IN_D_BITS(30, N) + IS_REPRESENTABLE_IN_D_BITS(31, N) + IS_REPRESENTABLE_IN_D_BITS(32, N) ) )
 
@@ -22,11 +21,7 @@ typedef struct {
    SLICE_TYPE slice[BITSLICED_OPERAND_WIDTH];
 } bs_operand_t;
 
-static inline
-void bitslice_half_adder(SLICE_TYPE  addend_a,
-                         SLICE_TYPE  addend_b,
-                         SLICE_TYPE *result,
-                         SLICE_TYPE *carry_out)
+static inline void bitslice_half_adder(SLICE_TYPE  addend_a, SLICE_TYPE  addend_b, SLICE_TYPE *result, SLICE_TYPE *carry_out)
 {
    _mm256_storeu_si256 (result, _mm256_xor_si256(addend_a, addend_b));
    _mm256_storeu_si256 (carry_out, _mm256_and_si256(addend_a, addend_b));
@@ -34,8 +29,7 @@ void bitslice_half_adder(SLICE_TYPE  addend_a,
 }
 
 /* a + b, dove b vale 0 o 1 per ciascun contatore */
-static inline
-bs_operand_t bitslice_inc(bs_operand_t a, SLICE_TYPE b)
+static inline bs_operand_t bitslice_inc(bs_operand_t a, SLICE_TYPE b)
 {
    bs_operand_t result;
    SLICE_TYPE carry;
@@ -52,8 +46,7 @@ bs_operand_t bitslice_inc(bs_operand_t a, SLICE_TYPE b)
 /* *a += b solo sui primi nplanes piani (nplanes pubblico). Corretto quando i
  * contatori, dopo la somma, stanno in nplanes bit: i piani sopra restano a
  * zero e il riporto finale e' nullo. In-place, senza copie dell'operando. */
-static inline
-void bitslice_inc_planes(bs_operand_t *a, SLICE_TYPE b, int nplanes)
+static inline void bitslice_inc_planes(bs_operand_t *a, SLICE_TYPE b, int nplanes)
 {
    SLICE_TYPE carry = b;
    for(int i = 0; i < nplanes; i++) {
@@ -64,8 +57,7 @@ void bitslice_inc_planes(bs_operand_t *a, SLICE_TYPE b, int nplanes)
 }
 
 /* a - b, dove b vale 0 o 1 per ciascun contatore (per aggiornare i contatori) */
-static inline
-bs_operand_t bitslice_dec(bs_operand_t a, SLICE_TYPE b)
+static inline bs_operand_t bitslice_dec(bs_operand_t a, SLICE_TYPE b)
 {
    bs_operand_t result;
    SLICE_TYPE carry;
@@ -83,8 +75,7 @@ bs_operand_t bitslice_dec(bs_operand_t a, SLICE_TYPE b)
 }
 
 /* tutti i contatori = constant (constant e' pubblico) */
-static inline
-bs_operand_t slice_constant(uint16_t constant)
+static inline bs_operand_t slice_constant(uint16_t constant)
 {
    bs_operand_t result;
    const __m256i one  = _mm256_set1_epi64x(-1);
