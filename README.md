@@ -1,5 +1,74 @@
 
 
+## Ridurre il leakage 
+
+Calcolare i counter in modalita' bisliced e poi convertire in uint8, in questo modo non ho piu' accessi che dipendono dalla chiave ma una parte costante l'unica parte che rimarrebbe sarebbe update della sindrome.
+
+```
+
+void sliced_to_uint8(const bs_operand_t* bs, uint8_t* ctrs, int total_elements, int bitsliced_width) {
+   memset(ctrs, 0, total_elements * sizeof(uint8_t));
+
+   for (int i = 0; i < N0; i++) {
+      // global offset 
+      const bs_operand_t* bs_block = bs + i * NUM_SLICES_GF2X_ELEMENT;
+      
+      for (int j = 0; j < P; j++) {
+
+         // inversione dell'ordine dato che il polinomio è rappresentato in big endian mentre il counter array considera le posizioni in little endian
+         int poly_idx    = (P - 1) - j;
+         // tocca aggiungere il padding di 61 bit che si trova all'inizio
+         int adjusted    = poly_idx + SLACK_SIZE;
+         int block       = adjusted / 256;
+         int lane        = (adjusted / 64) % 4;
+         int bit_in_lane = 63 - (adjusted % 64);
+
+         uint64_t lanes[4];
+         uint8_t val = 0;
+         for (int k = 0; k < bitsliced_width; k++) {
+            memcpy(lanes, &bs_block[block].slice[k], sizeof(lanes));
+            uint64_t bit = (lanes[lane] >> bit_in_lane) & 1ULL;
+            val += (uint8_t)(bit << k);
+         }
+         ctrs[i * P + j] = val;
+      }
+  }
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 The normal use case of `valgrind/memcheck` is to find uninitialised memory, which it means memory never used. But if we mark as unitialised memory areas where the secret key is stored we can find:
 
 - *Conditional jump or move* depending on the secret key;
