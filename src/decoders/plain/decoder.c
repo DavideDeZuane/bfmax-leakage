@@ -7,7 +7,7 @@
  * iniziale) e' in prepare.c.
  */
  #include <immintrin.h>
- #include "bfmax.h"
+ #include "decoder.h"
  #include "ct.h"
  #include "gf2x.h"
  #include "upc.h"

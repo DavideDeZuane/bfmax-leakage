@@ -5,7 +5,7 @@
  * registri AVX2 (come l'inizio di bfmax_decoder e il main.c originali).
  */
  #include <string.h>
- #include "bfmax.h"
+ #include "decoder.h"
  #include "repr.h"
  
  void decode_prepare(

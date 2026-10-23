@@ -19,6 +19,11 @@
 
 include variants.mk
 
+# niente regole implicite di make: tutte le regole sono qui sotto (evita
+# tentativi di rigenerare i .d con '%: %.c', es. con make -B)
+MAKEFLAGS += --no-builtin-rules
+.SUFFIXES:
+
 VARIANT ?= ct_find
 PROFILE ?= release
 TOOL    ?= correctness
@@ -76,6 +81,22 @@ VFLAGS  := $($(VARIANT).flags)
 
 COMMON_SRC := harness/common/instance.c
 COMMON_OBJ := $(COMMON_SRC:%.c=$(OBJ)/%.o)
+
+# --- controllo sorgenti: messaggio esplicito invece di "No rule to make target"
+TOOL_SRC_correctness := harness/correctness/test_correctness.c
+TOOL_SRC_ctgrind     := harness/ctgrind/test_ctgrind.c
+TOOL_SRC_ttest       := harness/dudect/ttest.c
+TOOL_SRC_bench       := harness/bench/bench_decoder.c
+TOOL_SRC_mastik      := harness/mastik/victim.c
+TOOL_SRC_lib         :=
+NEEDED_SRC  := $(LIB_SRC) $(if $(filter lib,$(TOOL)),,$(COMMON_SRC)) $(TOOL_SRC_$(TOOL))
+MISSING_SRC := $(filter-out $(wildcard $(NEEDED_SRC)),$(NEEDED_SRC))
+NOBUILD_GOALS := clean list help matrix hotspot
+ifneq ($(MISSING_SRC),)
+ifneq ($(filter-out $(NOBUILD_GOALS),$(or $(MAKECMDGOALS),all)),)
+$(error Sorgenti mancanti per VARIANT=$(VARIANT) TOOL=$(TOOL): $(MISSING_SRC))
+endif
+endif
 
 .PHONY: all lib correctness ctgrind ttest bench mastik matrix list clean help profile hotspot
 all: $(TOOL)
@@ -181,7 +202,3 @@ help:
 	@sed -n '2,20p' Makefile
 
 -include $(shell find build -name '*.d' 2>/dev/null)
-
-# sorgente mancante: messaggio esplicito invece di "No rule to make target"
-src/%.c harness/%.c:
-	$(error Sorgente mancante: $@ (file non copiato o percorso diverso?))
