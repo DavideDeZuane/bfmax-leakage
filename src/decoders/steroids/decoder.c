@@ -19,7 +19,6 @@
  #include "ct.h"
  #include "gf2x.h"
  #include "upc.h"
- #include "debug.h"
  
  ////////////////////////////////////////////////////////////////////////////////
  /* sb[j] -= A[(j-pos) mod r]  (or += when !neg); returns running max */
