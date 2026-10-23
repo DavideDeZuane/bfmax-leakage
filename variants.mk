@@ -15,17 +15,20 @@
 
 plain.common    := decode_prepare.c decoder.c
 steroids.common := decode_prepare.c decoder.c ctx.c
+bitslice.common := decode_prepare.c decoder.c
 
 # --------------------------------------------------------------- versioni ----
 #                 dal piu' leaky al piu' protetto
-VARIANTS := plain steroids
+VARIANTS := plain steroids bitslice
 
-steroids.dir         := steroids
-steroids.src         :=
-steroids.flags       := -DVT_FIND
+steroids.dir     := steroids
+steroids.src     :=
+steroids.flags   := -DVT_FIND
 
-# bfmax.h -> decoder base (argmax CT ricalcolato, update riga per riga)
-plain.dir         := plain
-plain.src         :=
-plain.flags       :=
+plain.dir        := plain
+plain.src        :=
+plain.flags      :=
 
+bitslice.dir     := bitslice
+bitslice.src     :=
+bitslice.flags   := -DCT_VARSHIFT

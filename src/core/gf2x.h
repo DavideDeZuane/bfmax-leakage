@@ -54,7 +54,7 @@ static INLINE int population_count(DIGIT upc[])
 }
 
 /* ------------------------------------------------------------------------------*/
-tatic INLINE void gf2x_mod_densify_VT(DIGIT dense[NUM_DIGITS_GF2X_ELEMENT],
+static INLINE void gf2x_mod_densify_VT(DIGIT dense[NUM_DIGITS_GF2X_ELEMENT],
                                        CONST POS exponent[],
                                        int num_exponents)
 {

@@ -3,7 +3,9 @@
 Each directory contains the implementation of the BF-max decoder with some modifications.  
 The general structure is the following:
 
-- `decoder_params.h `
+- `decoder_params.h`
+- `decode_prepare.c`
+- `decoder.c`
 
 
 
