@@ -2,6 +2,24 @@
 
 See the leakage of the BF-max decoder
 
+
+
+## Scripts
+
+Directory `scripts` contains a lot of bash executable to automatize some procedure.
+
+
+### Profiling
+
+To test the performances of the implementation run the following command:
+
+```
+./scripts/run_profiling.sh <variant>
+```
+
+
+
+
 ## Variants
 
 This section describes the BF-Max decoder variants available in the repository, what each one protects against, and what is still known to leak.
