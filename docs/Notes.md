@@ -1,3 +1,43 @@
+
+Nel fare le sisure di mastik, in generale di SCA possiamo diminuire il rumore andando a modificare il governor della cpu:
+
+```
+cpupower frequency-set -g performance
+```
+
+Also disable turbo-boost:
+
+```
+echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost
+```
+
+L1 cache is private so to test a victim program we have to fix the spycode and the victim code on the same core using:
+
+```
+taskset
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 The normal use case of `valgrind/memcheck` is to find uninitialised memory, which it means memory never used. But if we mark as unitialised memory areas where the secret key is stored we can find:
 
 - *Conditional jump or move* depending on the secret key;
