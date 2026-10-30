@@ -16,9 +16,24 @@ int main(int argc, char **argv)
    srand(seed);
 
    int set_gran = getenv("GRAN") && strcmp(getenv("GRAN"), "set") == 0;
-   uint32_t shift = set_gran ? 6 : 0;
+
+   /* larghezza linea in byte (solo per granularita' 'set'): env LINE, default 64.
+    * deve essere una potenza di 2; shift = log2(LINE). bit  ->  shift 0, LINE 1. */
+   uint32_t line_bytes = 1;          /* bit: 1 posizione per "linea" */
+   uint32_t shift      = 0;
+   if (set_gran) {
+      const char *g = getenv("LINE");
+      line_bytes = g ? (uint32_t)atoi(g) : 64;
+      if (line_bytes == 0 || (line_bytes & (line_bytes - 1)) != 0) {
+         fprintf(stderr, "LINE='%s' non valida: usa una potenza di 2 (8,16,32,64...)\n",
+                 g ? g : "");
+         return 1;
+      }
+      uint32_t b = line_bytes;
+      while (b > 1) { b >>= 1; shift++; }          /* shift = log2(line_bytes) */
+   }
    /* domain */
-   uint32_t dom   = set_gran ? ((P + 63) / 64) : P;
+   uint32_t dom = (P + line_bytes - 1) / line_bytes;   /* = ceil(P / LINE); bit -> P */
 
    /* -------------------------------------------------------------------------------------------- */
    /* Setup */ 
@@ -79,7 +94,8 @@ int main(int argc, char **argv)
 
    /* Reference file for the keys, it will be not used by the attacker */
    FILE *f = fopen(truth, "w");
-   fprintf(f, "P %d V %d N0 %d gran %s iters %d\n", P, V, N0, set_gran ? "set" : "bit", iter);
+   fprintf(f, "P %d V %d N0 %d gran %s line %u iters %d\n",
+      P, V, N0, set_gran ? "set" : "bit", line_bytes, iter);
    for (int b = 0; b < N0; b++) {
       for (int k = 0; k < V; k++) fprintf(f, "%s%u", k ? " " : "", key.Htr_sparse[b][k]);
       fprintf(f, "\n");

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import math
 import numpy as np
 
 def read_trace(f):
@@ -16,12 +17,7 @@ def read_trace(f):
         iters.append([int(x) for x in line.split()])
     return dom, iters
 
-# This function generates the matrix with a row for number of iteration and a one in the position touched 
-# M =  [
-#           [0,0,1,1,0,0,0,1],      # riga 0: toccate 2,3,7
-#           [1,0,0,0,1,0,0,0],      # riga 1: toccate 0,4
-#           [0,0,0,1,0,0,0,1]       # riga 2: touched 3,7
-#      ]    
+# Matrice indicatrice: una riga per iterazione, un 1 nelle posizioni/linee toccate.
 def indicators(iters, dom):
     M = np.zeros((len(iters), dom), dtype=np.float64)
     for t, s in enumerate(iters):
@@ -29,7 +25,7 @@ def indicators(iters, dom):
     return M
 
 def best_shift(fa, b_vec):
-    """Shift s e picco della cross-correlazione circolare di a (via FFT fa) con b."""
+    """Shift ciclico s e overlap che allineano b_vec su a (a di cui fa=rfft)."""
     corr = np.fft.irfft(fa * np.conj(np.fft.rfft(b_vec)), n=len(b_vec))
     s = int(np.argmax(corr))
     return s, corr[s]
@@ -38,8 +34,8 @@ def recover_block(members, M, F, dom, ref):
     """Allinea tutte le iterazioni del blocco a 'ref' e vota il supporto."""
     votes = np.zeros(dom)
     for j in members:
-        s, _ = best_shift(F[ref], M[j])      # M[j] = shift di M[ref] di s
-        votes += np.roll(M[j], s)            # riporta all'allineamento di ref
+        s, _ = best_shift(F[ref], M[j])      # porta M[j] nel frame di ref
+        votes += np.roll(M[j], s)
     return votes
 
 def support_up_to_shift(votes, weight):
@@ -57,47 +53,66 @@ def score_up_to_cyclic_shift(rec, true_set, dom):
 def main():
     truth_file = sys.argv[1]
     dom, iters = read_trace(sys.stdin)
+
     with open(truth_file) as tf:
         hdr = tf.readline().split()
         P = int(hdr[1]); V = int(hdr[3]); N0 = int(hdr[5]); gran = hdr[7]
+        # header: "P .. V .. N0 .. gran .. line <bytes> iters .."
+        # retrocompat: se manca 'line', assume 64 (vecchie truth.txt).
+        line_bytes = int(hdr[9]) if len(hdr) > 9 and hdr[8] == "line" else 64
         true_rows = [set(int(x) for x in tf.readline().split()) for _ in range(N0)]
+
+    # --- coerenza trace/truth: devono venire dallo stesso LINE ------------
+    exp_dom = math.ceil(P / line_bytes) if gran == "set" else P
+    if dom != exp_dom:
+        sys.exit(f"trace/truth non combaciano: trace dom={dom}, "
+                 f"truth P={P} line={line_bytes}B -> atteso dom={exp_dom}. "
+                 f"Rigenera la coppia con lo stesso LINE.")
+
+    # riduce le posizioni vere alla granularita' della trace: pos >> log2(line)
     if gran == "set":
-        true_rows = [set(p >> 6 for p in r) for r in true_rows]
+        shift = line_bytes.bit_length() - 1          # log2(line_bytes)
+        true_rows = [set(p >> shift for p in r) for r in true_rows]
 
     n = len(iters)
-    print(f"traccia: {n} iterazioni, dominio {dom} ({gran}-granularity), "
-          f"peso per riga {V}\n")
-
     M = indicators(iters, dom)
     F = np.fft.rfft(M, axis=1)
 
-    # peso effettivo dei supporti osservati (con GRAN=set collisioni -> < V)
     weights = M.sum(axis=1)
     w_typ = int(round(np.median(weights)))
 
-    # --- Fase 1: clustering nei 2 blocchi ---------------------------------
-    # riferimento del blocco A = iterazione 0; picco vs ref separa A da B
-    peaks = np.array([best_shift(F[0], M[j])[1] for j in range(n)])
-    thr = w_typ * 0.6                    # netto: same-block ~w_typ, cross ~0
-    A = [j for j in range(n) if peaks[j] >= thr]
-    B = [j for j in range(n) if peaks[j] < thr]
-    print(f"clustering: blocco A = {len(A)} iterazioni, blocco B = {len(B)} "
-          f"(soglia picco {thr:.0f}; picchi A~{peaks[A].mean():.0f}, "
-          f"B~{peaks[B].mean():.1f})" if B else
-          f"clustering: tutte le {len(A)} iterazioni in un blocco solo")
+    print(f"traccia: {n} iterazioni, dominio {dom} ({gran}-granularity, "
+          f"line={line_bytes}B), peso osservato per riga {w_typ} (V={V})\n")
+
+    # --- Fase 1: clustering a DUE riferimenti -----------------------------
+    # Niente soglia fissa: ref_a = iter 0, ref_b = l'iterazione che correla
+    # PEGGIO con ref_a (quasi certamente l'altro blocco). Ogni iterazione va
+    # al riferimento con cui ha l'overlap maggiore. Robusto anche a line=64.
+    ref_a = 0
+    pa = np.array([best_shift(F[ref_a], M[j])[1] for j in range(n)])
+    ref_b = int(np.argmin(pa))
+    pb = np.array([best_shift(F[ref_b], M[j])[1] for j in range(n)])
+
+    A = [j for j in range(n) if pa[j] >= pb[j]]
+    B = [j for j in range(n) if pa[j] <  pb[j]]
+
+    print(f"clustering: blocco A = {len(A)} iterazioni (ref {ref_a}), "
+          f"blocco B = {len(B)} (ref {ref_b})")
+    print(f"  picchi vs ref_a: istogramma {np.histogram(pa, bins=8)[0].tolist()}")
+    print(f"  overlap medio nel proprio gruppo: "
+          f"A~{pa[A].mean():.1f}, B~{pb[B].mean():.1f}\n")
 
     groups = [g for g in (A, B) if g]
 
     # --- Fase 2: allineamento + voto per ogni blocco ----------------------
+    # bit -> V posizioni; line-space -> w_typ linee (il blocco occupa ~w_typ linee)
+    k = V if gran == "bit" else w_typ
     recovered = []
-    for gi, g in enumerate(groups):
-        ref = g[0]
-        votes = recover_block(g, M, F, dom, ref)
-        rec = support_up_to_shift(votes, V if gran == "bit" else w_typ)
-        recovered.append(rec)
+    for g in groups:
+        votes = recover_block(g, M, F, dom, g[0])
+        recovered.append(support_up_to_shift(votes, k))
 
-    # --- Scoring: ogni blocco recuperato vs le righe vere, a meno di shift -
-    print()
+    # --- Scoring: blocco recuperato vs righe vere, a meno di shift ciclico -
     used = set()
     total_ok = 0
     for gi, rec in enumerate(recovered):
@@ -111,14 +126,13 @@ def main():
         ov, bi, s = best
         used.add(bi)
         total_ok += ov
-        print(f"blocco recuperato #{gi}  ->  Htr[{bi}]  "
-              f"(shift {s}):  {ov}/{len(true_rows[bi])} posizioni corrette "
+        print(f"blocco recuperato #{gi}  ->  Htr[{bi}]  (shift {s}):  "
+              f"{ov}/{len(true_rows[bi])} posizioni corrette "
               f"({100*ov/len(true_rows[bi]):.1f}%)")
 
-    denom = sum(len(r) for r in true_rows[:len(recovered)])
+    denom = sum(len(true_rows[bi]) for bi in used)
     print(f"\ntotale: {total_ok}/{denom} posizioni della chiave recuperate "
           f"da UNA sola traccia ({100*total_ok/denom:.1f}%)")
 
 if __name__ == "__main__":
     main()
-

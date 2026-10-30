@@ -1,4 +1,4 @@
-# =============================================================================
+# ===========# =============================================================================
 #  bfmax-leakage - build matrix
 #
 #    make VARIANT=<versione> PROFILE=<profilo> TOOL=<tool>
@@ -7,8 +7,9 @@
 #  PROFILE : release | debug | profile        (default: release)
 #  TOOL    : correctness | ctgrind | ttest | bench | mastik | lib
 #  CYCLES  : rdtscp | cpucycles               (default: rdtscp)
+#  TOY     : TOY=1 per l'istanza toy          (default: istanza reale)
 #
-#  Output: build/<VARIANT>-<PROFILE>/
+#  Output: build/<VARIANT>-<PROFILE>[-toy]/
 #
 #    make matrix TOOL=...   compila il tool per tutte le versioni
 #    make list              elenca le versioni
@@ -66,10 +67,20 @@ ifeq ($(CYCLES),cpucycles)
 CPPFLAGS += -DUSE_CPUCYCLES
 LDLIBS_CYC := -lcpucycles
 endif
+
+# --- istanza toy: definisce la macro TOY (ramo #else negli header) -----------
+# va in CPPFLAGS (e' una macro del preprocessore) e DOPO che CPPFLAGS esiste,
+# altrimenti il successivo 'CFLAGS :=' la cancellerebbe.
+ifdef TOY
+CPPFLAGS += -DTOY
+endif
+
 CFLAGS := -std=gnu11 -Wall -Wextra -Wno-unused-function $(OPT) -MMD -MP $(EXTRA_CFLAGS)
 LDLIBS := -lm $(LDLIBS_CYC)
 
-BUILD := build/$(VARIANT)-$(PROFILE)
+# output separato per istanza: reale e toy non si pestano gli oggetti,
+# quindi niente rebuild forzato ne' 'clean' obbligatorio al cambio di TOY.
+BUILD := build/$(VARIANT)-$(PROFILE)$(if $(TOY),-toy)
 OBJ   := $(BUILD)/obj
 
 # --- libreria del decoder: identica per tutti i tool ------------------------
@@ -158,7 +169,7 @@ $(BUILD)/spy_l1pp: harness/mastik/spy_l1pp.c
 # --- matrice completa ---------------------------------------------------------
 matrix:
 	@for v in $(VARIANTS); do \
-	  $(MAKE) --no-print-directory VARIANT=$$v PROFILE=$(PROFILE) TOOL=$(TOOL) || exit 1; \
+	  $(MAKE) --no-print-directory VARIANT=$$v PROFILE=$(PROFILE) TOOL=$(TOOL) TOY=$(TOY) || exit 1; \
 	done
 
 list:
@@ -183,11 +194,11 @@ PROF_DIR     := results/profile
 PROF_DATA    := $(PROF_DIR)/$(VARIANT).perf.data
 
 profile:
-	@$(MAKE) --no-print-directory VARIANT=$(VARIANT) PROFILE=profile TOOL=bench
+	@$(MAKE) --no-print-directory VARIANT=$(VARIANT) PROFILE=profile TOOL=bench TOY=$(TOY)
 	@mkdir -p $(PROF_DIR)
 	$(PERF_PREFIX) taskset -c $(PERF_CPU) $(PERF) record -F $(PERF_FREQ) \
 	    --call-graph dwarf,8192 --sample-cpu --mmap-pages $(PERF_MMAP) -o $(PROF_DATA) \
-	    build/$(VARIANT)-profile/bench_decoder $(PROFILE_RUNS)
+	    build/$(VARIANT)-profile$(if $(TOY),-toy)/bench_decoder $(PROFILE_RUNS)
 	@echo "registrazione: $(abspath $(PROF_DATA))  ->  make VARIANT=$(VARIANT) hotspot"
 
 # percorso assoluto: le AppImage (hotspot) possono cambiare directory all'avvio
@@ -201,4 +212,4 @@ clean:
 help:
 	@sed -n '2,20p' Makefile
 
--include $(shell find build -name '*.d' 2>/dev/null)
+-include $(shell find build -name '*.d' 2>/dev/null)ll find build -name '*.d' 2>/dev/null)

@@ -2,6 +2,8 @@
 
 See the leakage of the BF-max decoder
 
+- `TOY=1` to use a toy code 
+
 
 
 ## Scripts
