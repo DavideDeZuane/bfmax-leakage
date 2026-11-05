@@ -208,12 +208,12 @@ def main():
         print(f"     block 0  (h0)    {len(exact)}/{V} positions   " + _c("[EXACT]", GREEN, tty))
         print(f"     block 1  (h1)    {len(t1_rec)}/{V} positions   "
               + _c("[EXACT]", GREEN, tty) + "   (from h1 = h0*h)")
-        os.makedirs("recovered_alg", exist_ok=True)
+        os.makedirs("keys", exist_ok=True)
         for name, sup in (("H0", exact), ("H1", t1_rec)):
-            with open(f"recovered_alg/{name}", "w") as fo:
+            with open(f"keys/{name}", "w") as fo:
                 for x in sorted(sup): fo.write(f"{x}\n")
         print("\n  " + _c(" FULL PRIVATE KEY RECOVERED ", GREEN, tty))
-        print(_c("  written to  recovered_alg/H0  recovered_alg/H1", DIM, tty))
+        print(_c("  written to  keys/H0  keys/H1", DIM, tty))
     else:
         if not full:
             print("     " + _c("true key outside candidate set -> no valid solution", RED, tty))

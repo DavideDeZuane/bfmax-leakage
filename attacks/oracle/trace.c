@@ -16,6 +16,8 @@ int main(int argc, char **argv)
    srand(seed);
 
    int set_gran = getenv("GRAN") && strcmp(getenv("GRAN"), "set") == 0;
+   const char *_nc = getenv("NOCARRY");
+	int nocarry = _nc && _nc[0] && _nc[0] != '0';   // on solo con NOCARRY=1
 
    /* larghezza linea in byte (solo per granularita' 'set'): env LINE, default 64.
     * deve essere una potenza di 2; shift = log2(LINE). bit  ->  shift 0, LINE 1. */
@@ -76,9 +78,19 @@ int main(int argc, char **argv)
    	/* Logging of the position will be touched during the update */ 
    	/* --------------------------------------------------------------------------------------- */
       for (int k = 0; k < V; k++) {
-         uint32_t row = key.Htr_sparse[b][k] + pos;
-         row -= (row >= P) ? P : 0;
-         seen[row >> shift] = 1;
+         uint32_t row;
+         if (nocarry) {
+            /* riduci a LINEA prima di sommare: l'offset r non puo' traboccare
+               nell'indice di linea -> nessun carry. Lavoriamo in spazio-linea. */
+            row = (key.Htr_sparse[b][k] >> shift) + (pos >> shift);
+            row -= (row >= dom) ? dom : 0;
+         } else {
+            /* reale: somma a livello bit, POI riduci a linea -> il carry puo' esserci */
+            row = key.Htr_sparse[b][k] + pos;
+            row -= (row >= P) ? P : 0;
+            row >>= shift;
+         }
+         seen[row] = 1;
       }
       int first = 1;
       for (uint32_t s = 0; s < dom; s++)
@@ -106,4 +118,3 @@ int main(int argc, char **argv)
            seed, set_gran ? "set" : "bit", iter, hw == 0 ? "ok" : "non converge");
    return 0;
 }
-

@@ -16,6 +16,11 @@
 # Variabili d'ambiente opzionali:
 #   CC    (default cc), MARCH (default x86-64-v3)
 #   TOY   (default vuoto) - TOY=1 usa l'istanza toy (ramo #else degli header)
+#   NOCARRY (default vuoto) - NOCARRY=1 ablazione: riduce a linea PRIMA di
+#               sommare pos, cosi' l'offset non puo' traboccare -> niente carry.
+#               Ha effetto solo con 'set' (a 'bit' non c'e' riduzione, ne' carry).
+#               Serve a misurare quanto leakage nasconde il carry (oracolo NON
+#               fisico: l'hardware somma indirizzi interi, il carry c'e' sempre).
 #
 # Output, nella cartella da cui lanci lo script:
 #   trace.txt  insiemi toccati per iterazione (input dello scorer)
@@ -39,6 +44,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 CC="${CC:-cc}"
 MARCH="${MARCH:-x86-64-v3}"
+NOCARRY="${NOCARRY:-}"
 INC=(-I"$ROOT/include" -I"$ROOT/src/core" -I"$ROOT/harness/common" -I"$ROOT/src/decoders/plain")
 
 # --- istanza toy: -DTOY e build/output separati ------------------------------
@@ -70,12 +76,13 @@ echo ">> compilo instance.c"
 echo ">> linko"
 "$CC" "$BUILD/trace.o" "$BUILD/instance.o" -o "$BUILD/trace" -lm
 
+CARRY_TAG="carry=on"; [ -n "$NOCARRY" ] && CARRY_TAG="carry=OFF (ablazione)"
 if [ "$GRAN_ARG" = set ]; then
-  echo ">> eseguo: granularita'=set(line=$LINE_ARG byte)  seed=$SEED  istanza=$INSTANCE_TAG"
+  echo ">> eseguo: granularita'=set(line=$LINE_ARG byte)  seed=$SEED  istanza=$INSTANCE_TAG  $CARRY_TAG"
 else
-  echo ">> eseguo: granularita'=bit  seed=$SEED  istanza=$INSTANCE_TAG"
+  echo ">> eseguo: granularita'=bit  seed=$SEED  istanza=$INSTANCE_TAG  (carry non applicabile)"
 fi
-GRAN="$GRAN_ENV" LINE="$LINE_ARG" "$BUILD/trace" truth.txt "$SEED" > trace.txt
+GRAN="$GRAN_ENV" LINE="$LINE_ARG" NOCARRY="$NOCARRY" "$BUILD/trace" truth.txt "$SEED" > trace.txt
 
 echo
 echo "fatto. Prodotti nella cartella corrente:"
