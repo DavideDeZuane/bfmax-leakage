@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""
+====================================================================
+Algebraic key recovery from cache-channel candidates.
+
+  1) (data)   h = h1 * h0^{-1} mod (x^P+1)   -> public key
+  2) (input)  candidate sets C0, C1
+  3) (output) (h0, h1):  h0 from the linear system,  h1 = h0 * h
+
+Candidate source (env POS):
+  POS=1  (default)  bit-level candidates from  <recov>/candidates_H{0,1}
+                    produced by  SEL=pos ./trace2support   (USES the argmax pos)
+  POS=0             64-bit windows of the recovered LINES in <line>/H{0,1}
+                    produced by  ./trace2support            (NO pos)
+
+The POS=0 path demonstrates that WITHOUT the argmax the candidate set does not
+contain all true key positions (recall gap), so the exact recovery fails.
+====================================================================
+"""
+import sys, numpy as np
+import os
+
+RECOV_DIR = "suppt"      # candidati pos
+LINE_DIR  = "suppt"      # recupero a linee (no pos)
+TRUTH_DIR = "truth"
+
+def deg(a): return a.bit_length() - 1
+
+# ---------------------------------------------------------------------------------
+# GF2X Arithm
+# ---------------------------------------------------------------------------------
+def gf2mul(a, b):
+    r = 0
+    while b:
+        if b & 1: r ^= a
+        b >>= 1; a <<= 1
+    return r
+
+def gf2divmod(a, b):
+    q = 0; db = deg(b)
+    while a and deg(a) >= db:
+        d = deg(a) - db
+        q ^= (1 << d); a ^= b << d
+    return q, a
+
+def gf2inv(a, f):
+    r0, r1 = f, a
+    s0, s1 = 0, 1
+    while r1:
+        q, rem = gf2divmod(r0, r1)
+        r0, r1 = r1, rem
+        s0, s1 = s1, s0 ^ gf2mul(q, s1)
+    if r0 != 1: return None
+    return gf2divmod(s0, f)[1]
+
+def poly_from_support(sup):
+    v = 0
+    for p in sup: v |= (1 << p)
+    return v
+def support_of(poly, P):
+    return [i for i in range(P) if (poly >> i) & 1]
+
+# ---------------------------------------------------------------------------------
+# candidate sets
+# ---------------------------------------------------------------------------------
+def line_window_candidates(line_dir, b, P, line, shift):
+    """NO-POS: ogni linea recuperata -> la sua finestra di `line` posizioni bit."""
+    rec_lines = sorted(set(int(x) for x in open(f"{line_dir}/H{b}").read().split()))
+    C = set()
+    for L in rec_lines:
+        base = L << shift
+        for r in range(line):
+            if base + r < P: C.add(base + r)
+    return sorted(C)
+
+# ---------------------------------------------------------------------------------
+# KERNEL
+# ---------------------------------------------------------------------------------
+def nullspace(rows, ncols):
+    pivots = {}
+    for r in rows:
+        cur = r
+        while cur:
+            c = (cur & -cur).bit_length() - 1
+            if c in pivots: cur ^= pivots[c]
+            else: pivots[c] = cur; break
+    for c in sorted(pivots):
+        for c2 in sorted(pivots):
+            if c2 != c and (pivots[c] >> c2) & 1:
+                pivots[c] ^= pivots[c2]
+    piv_cols = set(pivots)
+    free = [c for c in range(ncols) if c not in piv_cols]
+    basis = []
+    for fcol in free:
+        vec = (1 << fcol)
+        for c, row in pivots.items():
+            if (row >> fcol) & 1: vec ^= (1 << c)
+        basis.append(vec)
+    return basis, free
+
+def recover_block(g, C0, C1, P, V):
+    inC1 = np.zeros(P, dtype=bool); inC1[C1] = True
+    colpos = C0
+    ncols = len(C0)
+    rows = []
+    for p in range(P):
+        if inC1[p]: continue
+        mask = 0
+        for j, c in enumerate(colpos):
+            if (g >> ((p - c) % P)) & 1: mask |= (1 << j)
+        if mask: rows.append(mask)
+    basis, free = nullspace(rows, ncols)
+    dim = len(basis)
+    sols = []
+    if dim <= 20:
+        for combo in range(1, 1 << dim):
+            v = 0
+            for b in range(dim):
+                if (combo >> b) & 1: v ^= basis[b]
+            if bin(v).count("1") == V:
+                sols.append([colpos[j] for j in range(ncols) if (v >> j) & 1])
+    return sols, dim
+
+def _c(s, code, tty):
+    return f"\033[{code}m{s}\033[0m" if tty else s
+
+# ---------------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------------
+def main():
+    rec_dir   = sys.argv[1] if len(sys.argv) > 1 else RECOV_DIR
+    truth_dir = sys.argv[2] if len(sys.argv) > 2 else TRUTH_DIR
+    use_pos   = os.environ.get("POS", "1") != "0"
+
+    P, V, N0, line, gran = open("trace/meta").read().split()
+    P, V, N0, line = int(P), int(V), int(N0), int(line)
+    shift = line.bit_length() - 1 if gran == "set" else 0
+    f = (1 << P) | 1
+    readints = lambda p: sorted(set(int(x) for x in open(p).read().split()))
+    tty = sys.stdout.isatty()
+    GREEN, RED, YEL, BOLD, DIM = "32;1", "31;1", "33;1", "1", "2"
+    bar = "=" * 56
+
+    print(_c(bar, BOLD, tty))
+    print(_c("  ALGEBRAIC KEY RECOVERY", BOLD, tty))
+    print(_c(bar, BOLD, tty))
+
+    # public key h = h1 * h0^{-1}
+    t = [poly_from_support(readints(f"{truth_dir}/H{b}")) for b in range(N0)]
+    t0inv = gf2inv(t[0], f)
+    assert t0inv is not None, "t0 not invertible"
+    g = gf2divmod(gf2mul(t[1], t0inv), f)[1]
+
+    # --- candidate sets ---
+    if use_pos:
+        C0 = readints(f"{rec_dir}/candidates_H0")
+        C1 = readints(f"{rec_dir}/candidates_H1")
+        src = f"pos candidates ({rec_dir}/candidates_H*)"
+    else:
+        C0 = line_window_candidates(LINE_DIR, 0, P, line, shift)
+        C1 = line_window_candidates(LINE_DIR, 1, P, line, shift)
+        src = f"line windows, NO pos ({LINE_DIR}/H*)"
+    neq = P - len(C1)
+
+    # --- candidate recall: i candidati contengono la chiave vera? (requisito) ---
+    truth_t0 = readints(f"{truth_dir}/H0")
+    truth_t1 = readints(f"{truth_dir}/H1")
+    cov0 = len(set(C0) & set(truth_t0)); cov1 = len(set(C1) & set(truth_t1))
+    full = (cov0 == V and cov1 == V)
+
+    print(f"\n  Candidate source   {src}")
+    print(f"  Candidates         |C0| = {len(C0)}     |C1| = {len(C1)}")
+    covcol = GREEN if full else RED
+    print("  Candidate recall   "
+          + _c(f"C0 covers {cov0}/{V} true", covcol if cov0==V else RED, tty)
+          + "   "
+          + _c(f"C1 covers {cov1}/{V} true", GREEN if cov1==V else RED, tty))
+    if not full:
+        print(_c("                     -> true key NOT fully inside candidates: "
+                 "recovery cannot succeed", RED, tty))
+
+    print(f"\n  {_c('Linear system over GF(2):', BOLD, tty)}")
+    print(f"     equations   {neq:>6}   (key positions that must be zero: outside C1)")
+    print(f"     unknowns    {len(C0):>6}   (candidate positions of block 0)")
+
+    sols, dim = recover_block(g, C0, C1, P, V)
+    uniq = ("unique non-trivial solution" if dim == 1
+            else f"{2**dim - 1} non-trivial vectors" if dim <= 20
+            else "kernel too large to enumerate")
+    print(f"     kernel dim  {dim:>6}   -> {uniq}")
+
+    # --- verdict ---
+    exact = next((s for s in sols if sorted(s) == truth_t0), None)
+    print(f"\n  {_c('Result:', BOLD, tty)}")
+    if exact is not None:
+        t1_rec = support_of(gf2divmod(gf2mul(poly_from_support(exact), g), f)[1], P)
+        print(f"     block 0  (h0)    {len(exact)}/{V} positions   " + _c("[EXACT]", GREEN, tty))
+        print(f"     block 1  (h1)    {len(t1_rec)}/{V} positions   "
+              + _c("[EXACT]", GREEN, tty) + "   (from h1 = h0*h)")
+        os.makedirs("recovered_alg", exist_ok=True)
+        for name, sup in (("H0", exact), ("H1", t1_rec)):
+            with open(f"recovered_alg/{name}", "w") as fo:
+                for x in sorted(sup): fo.write(f"{x}\n")
+        print("\n  " + _c(" FULL PRIVATE KEY RECOVERED ", GREEN, tty))
+        print(_c("  written to  recovered_alg/H0  recovered_alg/H1", DIM, tty))
+    else:
+        if not full:
+            print("     " + _c("true key outside candidate set -> no valid solution", RED, tty))
+            # mostra ESATTAMENTE quali posizioni vere il supporto non copre
+            print("\n  " + _c("Uncovered true-key positions (lost to the channel):", BOLD, tty))
+            for b, (C, tru) in enumerate(((C0, truth_t0), (C1, truth_t1))):
+                miss = sorted(set(tru) - set(C))
+                tag = _c(f"{len(miss)}/{V} missing", RED if miss else GREEN, tty)
+                print(f"     block {b} (h{b}):  {tag}")
+                for i in range(0, len(miss), 6):
+                    row = "  ".join(_c(f"pos {p:>6} (line {p>>shift})", RED, tty)
+                                    for p in miss[i:i+6])
+                    print("        " + row)
+        elif not sols:
+            print("     " + _c("no weight-V vector in the kernel", RED, tty)
+                  + "  (too few equations / candidates too wide)")
+        else:
+            ov = max(len(set(s) & set(truth_t0)) for s in sols)
+            print("     " + _c(f"best kernel solution matches only {ov}/{V}", RED, tty))
+        print("\n  " + _c(" KEY NOT RECOVERED ", RED, tty))
+        if not use_pos:
+            print(_c("  (NO-pos case: the line-granularity carry blur puts these true\n"
+                     "   positions on the wrong line, so no candidate window covers them)", DIM, tty))
+    print(_c(bar, BOLD, tty))
+    print()
+
+if __name__ == "__main__":
+    main()
