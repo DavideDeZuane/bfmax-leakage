@@ -23,3 +23,9 @@
 
    /* number of possible traces, which depens on the granularity (P because with bit they are all different, P/64 for sets because they can collide) */
 
+
+
+
+```
+K=65 python3 trace2support.py
+```

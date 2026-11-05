@@ -58,7 +58,7 @@ else
   BUILD="$HERE/build/real"
   INSTANCE_TAG="real"
 fi
-mkdir -p "$BUILD"
+mkdir -p "$BUILD" "$HERE/truth" "$HERE/trace"
 
 # trace.c chiama argmax_u8_ct e update_syndrome_and_upcs, che sono 'static
 # INLINE' dentro src/decoders/plain/decoder.c e non esposte da alcun header:
@@ -82,12 +82,14 @@ if [ "$GRAN_ARG" = set ]; then
 else
   echo ">> eseguo: granularita'=bit  seed=$SEED  istanza=$INSTANCE_TAG  (carry non applicabile)"
 fi
-GRAN="$GRAN_ENV" LINE="$LINE_ARG" NOCARRY="$NOCARRY" "$BUILD/trace" truth.txt "$SEED" > trace.txt
+cd "$HERE"
+GRAN="$GRAN_ENV" LINE="$LINE_ARG" NOCARRY="$NOCARRY" \
+   TRUTH_DIR=truth TRACE_DIR=trace "$BUILD/trace" "$SEED"
 
 echo
-echo "fatto. Prodotti nella cartella corrente:"
-echo "  trace.txt  ($(grep -vc '^#' trace.txt) iterazioni)"
-echo "  truth.txt"
-echo
-echo "per il recupero chiave:"
-echo "  python3 $HERE/key-recovery.py truth.txt < trace.txt"
+echo "prodotti: truth/H0 truth/H1  trace/H0 trace/H1  trace/pos_H0 trace/pos_H1  trace/meta"
+echo "stessa struttura di attack.c -> tool condivisi:"
+echo "  recupero esatto (sistema lineare):"
+echo "    SEL=pos ./trace2support trace suppt   &&   python3 keyrecover.py"
+echo "  metriche a linee (recall/precision):"
+echo "    ./trace2support trace suppt   (oppure il vecchio key-recovery.py)"
