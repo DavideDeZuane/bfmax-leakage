@@ -61,6 +61,7 @@ At this point a new kernel will appear on the `Advanced Setting of debian at sta
 
 - username: davide
 - password: davide
+- hostname: victim
 
 
 Creating disk for the VM
