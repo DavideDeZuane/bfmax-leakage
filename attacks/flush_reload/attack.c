@@ -80,7 +80,7 @@ int main(int argc, char **argv)
    FILE *tf[N0], *pf[N0];
    for (int b=0;b<N0;b++){
       snprintf(path,sizeof path,"%s/H%d",trace_dir,b);     tf[b]=fopen(path,"w");
-      snprintf(path,sizeof path,"%s/pos_H%d",trace_dir,b);   pf[b]=fopen(path,"w");
+      snprintf(path,sizeof path,"%s/pos%d",trace_dir,b);   pf[b]=fopen(path,"w");
       if(!tf[b]||!pf[b]){ fprintf(stderr,"non apro file in %s\n",trace_dir); return 1; }
    }
 

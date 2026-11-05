@@ -92,3 +92,4 @@ GRAN=set LINE="$LINE_ARG" THRESH="$THRESH" PERFECT="$PERFECT" TRUTH_DIR=truth TR
 
 echo; echo "results: truth/H0 truth/H1  trace/H0 trace/H1  trace/pos_H0 trace/pos_H1  trace/meta"
 echo "next:    SEL=pos ./trace2support trace recov  &&  POS=1 python3 keyrecover.py"
+

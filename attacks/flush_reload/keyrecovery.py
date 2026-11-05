@@ -20,8 +20,8 @@ contain all true key positions (recall gap), so the exact recovery fails.
 import sys, numpy as np
 import os
 
-RECOV_DIR = "suppt"      # candidati pos
-LINE_DIR  = "suppt"      # recupero a linee (no pos)
+RECOV_DIR = "suppt"      # candidati pos        (SEL=pos ./trace2support)
+LINE_DIR  = "suppt"      # recupero a linee     (./trace2support)
 TRUTH_DIR = "truth"
 
 def deg(a): return a.bit_length() - 1
@@ -152,11 +152,22 @@ def main():
     g = gf2divmod(gf2mul(t[1], t0inv), f)[1]
 
     # --- candidate sets ---
+    def need(paths, hint):
+        missing = [p for p in paths if not os.path.exists(p)]
+        if missing:
+            print(f"\n  [!] input not found: {', '.join(missing)}")
+            print(f"      generate it first with:\n        {hint}\n")
+            sys.exit(2)
+
     if use_pos:
+        need([f"{rec_dir}/candidates_H0", f"{rec_dir}/candidates_H1"],
+             f"SEL=pos ./trace2support trace {rec_dir}")
         C0 = readints(f"{rec_dir}/candidates_H0")
         C1 = readints(f"{rec_dir}/candidates_H1")
         src = f"pos candidates ({rec_dir}/candidates_H*)"
     else:
+        need([f"{LINE_DIR}/H0", f"{LINE_DIR}/H1"],
+             f"./trace2support trace {LINE_DIR}")
         C0 = line_window_candidates(LINE_DIR, 0, P, line, shift)
         C1 = line_window_candidates(LINE_DIR, 1, P, line, shift)
         src = f"line windows, NO pos ({LINE_DIR}/H*)"
